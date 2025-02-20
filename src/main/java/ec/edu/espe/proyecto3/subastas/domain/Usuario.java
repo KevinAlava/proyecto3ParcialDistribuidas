@@ -5,20 +5,34 @@ import lombok.Data;
 
 @Data
 @Entity
-@Table(name = "users")
+@Table(name = "usuario")
 public class Usuario {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "id")
     private Long id;
 
-    @Column(name = "username", unique = true, nullable = false, length = 50)
+    @Column(name = "username", unique = true, nullable = false)
     private String username;
 
-    @Column(name = "password", nullable = false, length = 100)
+    @Column(name = "password", nullable = false)
     private String password;
 
-    @Column(name = "role", nullable = false)
+    @Column(name = "email", unique = true, nullable = false)
+    private String email;
+
+    @Column(name = "nombre", nullable = false)
+    private String nombre;
+
     @Enumerated(EnumType.STRING)
+    @Column(name = "role", nullable = false)
     private Role role;
+
+    @Column(name = "estado")
+    private Boolean estado;
+
+    @PrePersist
+    public void prePersist() {
+        this.estado = true;
+    }
 } 

@@ -2,11 +2,11 @@ package ec.edu.espe.proyecto3.subastas.service;
 
 import ec.edu.espe.proyecto3.subastas.api.dto.PujaDTO;
 import ec.edu.espe.proyecto3.subastas.api.dto.UsuarioDTO;
-import ec.edu.espe.proyecto3.subastas.domain.Puja;
-import ec.edu.espe.proyecto3.subastas.domain.Subasta;
+import ec.edu.espe.proyecto3.subastas.domain.Auto;
+import ec.edu.espe.proyecto3.subastas.domain.DetalleSubasta;
 import ec.edu.espe.proyecto3.subastas.domain.Usuario;
-import ec.edu.espe.proyecto3.subastas.repository.PujaRepository;
-import ec.edu.espe.proyecto3.subastas.repository.SubastaRepository;
+import ec.edu.espe.proyecto3.subastas.repository.AutoRepository;
+import ec.edu.espe.proyecto3.subastas.repository.DetalleSubastaRepository;
 import ec.edu.espe.proyecto3.subastas.repository.UsuarioRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -14,6 +14,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.Date;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -21,84 +22,77 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class PujaService {
-    private final PujaRepository pujaRepository;
-    private final SubastaRepository subastaRepository;
+    private final DetalleSubastaRepository detalleSubastaRepository;
     private final UsuarioRepository usuarioRepository;
+    private final AutoRepository autoRepository;
     private final SimpMessagingTemplate messagingTemplate;
 
     @Transactional
     public PujaDTO placeBid(PujaDTO request) {
-        String username = SecurityContextHolder.getContext().getAuthentication().getName();
-        Usuario bidder = usuarioRepository.findByUsername(username)
-                .orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
-
-        Subasta auction = subastaRepository.findById(request.getAuctionId())
-                .orElseThrow(() -> new RuntimeException("Subasta no encontrada"));
-
-        validateBid(request, auction, bidder);
-
-        Puja puja = new Puja();
-        puja.setAmount(request.getAmount());
-        puja.setBidder(bidder);
-        puja.setAuction(auction);
-
-        puja = pujaRepository.save(puja);
-        
-        PujaDTO response = mapToDTO(puja);
-        messagingTemplate.convertAndSend("/topic/auction/" + auction.getId(), response);
-        
-        return response;
+        return realizarPuja(request.getAutoId(), request.getPrecioActual());
     }
 
     public List<PujaDTO> getBidsByAuction(Long auctionId) {
-        Subasta auction = subastaRepository.findById(auctionId)
-                .orElseThrow(() -> new RuntimeException("Subasta no encontrada"));
-
-        return pujaRepository.findByAuctionOrderByAmountDesc(auction)
-                .stream()
+        Auto auto = autoRepository.findById(auctionId)
+                .orElseThrow(() -> new RuntimeException("Auto no encontrado"));
+        
+        return detalleSubastaRepository.findByAuto(auto).stream()
                 .map(this::mapToDTO)
                 .collect(Collectors.toList());
     }
 
     public List<PujaDTO> getUserBids() {
         String username = SecurityContextHolder.getContext().getAuthentication().getName();
-        Usuario bidder = usuarioRepository.findByUsername(username)
+        Usuario postor = usuarioRepository.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
 
-        return pujaRepository.findByBidder(bidder)
-                .stream()
+        return detalleSubastaRepository.findByUltimoPostor(postor).stream()
                 .map(this::mapToDTO)
                 .collect(Collectors.toList());
     }
 
-    private void validateBid(PujaDTO request, Subasta auction, Usuario bidder) {
-        Date now = new Date();
-        if (now.before(auction.getStartTime()) || now.after(auction.getEndTime())) {
-            throw new RuntimeException("La subasta no está activa");
+    @Transactional
+    public PujaDTO realizarPuja(Long autoId, BigDecimal monto) {
+        String username = SecurityContextHolder.getContext().getAuthentication().getName();
+        Usuario postor = usuarioRepository.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
+
+        Auto auto = autoRepository.findById(autoId)
+                .orElseThrow(() -> new RuntimeException("Auto no encontrado"));
+
+        if (auto.getVendedor().equals(postor)) {
+            throw new RuntimeException("El vendedor no puede pujar por su propio auto");
         }
 
-        if (auction.getCar().getSeller().getId().equals(bidder.getId())) {
-            throw new RuntimeException("El vendedor no puede pujar en su propia subasta");
+        DetalleSubasta detalleSubasta = detalleSubastaRepository.findByAutoAndEstadoTrue(auto)
+                .orElseThrow(() -> new RuntimeException("Subasta no encontrada o finalizada"));
+
+        if (monto.compareTo(detalleSubasta.getPrecioActual()) <= 0) {
+            throw new RuntimeException("El monto debe ser mayor al precio actual");
         }
 
-        Puja highestBid = pujaRepository.findHighestBidForAuction(auction);
-        if (highestBid != null && request.getAmount().compareTo(highestBid.getAmount()) <= 0) {
-            throw new RuntimeException("La puja debe ser mayor que la puja más alta actual");
-        }
+        detalleSubasta.setPrecioActual(monto);
+        detalleSubasta.setUltimoPostor(postor);
+        detalleSubasta = detalleSubastaRepository.save(detalleSubasta);
+
+        return mapToDTO(detalleSubasta);
     }
 
-    private PujaDTO mapToDTO(Puja puja) {
+    private PujaDTO mapToDTO(DetalleSubasta detalleSubasta) {
         PujaDTO dto = new PujaDTO();
-        dto.setId(puja.getId());
-        dto.setAmount(puja.getAmount());
-        dto.setAuctionId(puja.getAuction().getId());
-
-        UsuarioDTO bidderDTO = new UsuarioDTO();
-        bidderDTO.setId(puja.getBidder().getId());
-        bidderDTO.setUsername(puja.getBidder().getUsername());
-        bidderDTO.setRole(puja.getBidder().getRole());
-        dto.setBidder(bidderDTO);
-
+        dto.setId(detalleSubasta.getId());
+        dto.setAutoId(detalleSubasta.getAuto().getId());
+        dto.setMarca(detalleSubasta.getAuto().getMarca());
+        dto.setModelo(detalleSubasta.getAuto().getModelo());
+        dto.setPrecioActual(detalleSubasta.getPrecioActual());
+        dto.setVendedorUsername(detalleSubasta.getAuto().getVendedor().getUsername());
+        dto.setEstado(detalleSubasta.getEstado());
+        dto.setVendido(detalleSubasta.getVendido());
+        
+        if (detalleSubasta.getUltimoPostor() != null) {
+            dto.setUltimoPostorUsername(detalleSubasta.getUltimoPostor().getUsername());
+        }
+        
         return dto;
     }
 } 

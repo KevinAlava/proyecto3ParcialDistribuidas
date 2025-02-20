@@ -35,15 +35,15 @@ public class AutoService {
     @Transactional
     public AutoDTO createCar(AutoDTO request) {
         String username = SecurityContextHolder.getContext().getAuthentication().getName();
-        Usuario seller = usuarioRepository.findByUsername(username)
+        Usuario vendedor = usuarioRepository.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
 
         Auto auto = new Auto();
-        auto.setMake(request.getMake());
-        auto.setModel(request.getModel());
-        auto.setYear(request.getYear());
-        auto.setBasePrice(request.getBasePrice());
-        auto.setSeller(seller);
+        auto.setMarca(request.getMake());
+        auto.setModelo(request.getModel());
+        auto.setAnio(request.getYear());
+        auto.setPrecioBase(request.getBasePrice());
+        auto.setVendedor(vendedor);
 
         auto = autoRepository.save(auto);
         return mapToDTO(auto);
@@ -51,10 +51,10 @@ public class AutoService {
 
     public List<AutoDTO> getCarsBySeller() {
         String username = SecurityContextHolder.getContext().getAuthentication().getName();
-        Usuario seller = usuarioRepository.findByUsername(username)
+        Usuario vendedor = usuarioRepository.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
 
-        return autoRepository.findByVendedor(seller).stream()
+        return autoRepository.findByVendedorAndVendidoFalse(vendedor).stream()
                 .map(this::mapToDTO)
                 .collect(Collectors.toList());
     }
@@ -62,16 +62,16 @@ public class AutoService {
     private AutoDTO mapToDTO(Auto auto) {
         AutoDTO dto = new AutoDTO();
         dto.setId(auto.getId());
-        dto.setMake(auto.getMake());
-        dto.setModel(auto.getModel());
-        dto.setYear(auto.getYear());
-        dto.setBasePrice(auto.getBasePrice());
+        dto.setMake(auto.getMarca());
+        dto.setModel(auto.getModelo());
+        dto.setYear(auto.getAnio());
+        dto.setBasePrice(auto.getPrecioBase());
         
-        UsuarioDTO sellerDTO = new UsuarioDTO();
-        sellerDTO.setId(auto.getSeller().getId());
-        sellerDTO.setUsername(auto.getSeller().getUsername());
-        sellerDTO.setRole(auto.getSeller().getRole());
-        dto.setSeller(sellerDTO);
+        UsuarioDTO vendedorDTO = new UsuarioDTO();
+        vendedorDTO.setId(auto.getVendedor().getId());
+        vendedorDTO.setUsername(auto.getVendedor().getUsername());
+        vendedorDTO.setRole(auto.getVendedor().getRole());
+        dto.setSeller(vendedorDTO);
         
         return dto;
     }

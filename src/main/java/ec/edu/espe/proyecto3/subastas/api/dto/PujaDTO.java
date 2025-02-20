@@ -6,7 +6,12 @@ import java.math.BigDecimal;
 @Data
 public class PujaDTO {
     private Long id;
-    private BigDecimal amount;
-    private UsuarioDTO bidder;
-    private Long auctionId;
+    private Long autoId;
+    private String marca;
+    private String modelo;
+    private BigDecimal precioActual;
+    private String vendedorUsername;
+    private String ultimoPostorUsername;
+    private Boolean estado;
+    private Boolean vendido;
 } 

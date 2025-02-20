@@ -1,6 +1,7 @@
 package ec.edu.espe.proyecto3.subastas.api.dto;
 
 import ec.edu.espe.proyecto3.subastas.domain.Role;
+import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -18,4 +19,11 @@ public class RegistroUsuarioDTO {
 
     @NotNull(message = "El rol es obligatorio")
     private Role role;
+
+    @NotBlank
+    @Email
+    private String email;
+
+    @NotBlank
+    private String nombre;
 } 

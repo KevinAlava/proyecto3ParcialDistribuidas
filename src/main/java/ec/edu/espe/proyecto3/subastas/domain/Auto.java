@@ -6,24 +6,24 @@ import java.math.BigDecimal;
 
 @Data
 @Entity
-@Table(name = "cars")
+@Table(name = "auto")
 public class Auto {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "id")
     private Long id;
 
-    @Column(name = "make", nullable = false, length = 50)
-    private String make;
+    @Column(name = "marca")
+    private String marca;
 
-    @Column(name = "model", nullable = false, length = 50)
-    private String model;
+    @Column(name = "modelo")
+    private String modelo;
 
-    @Column(name = "year", nullable = false)
-    private Integer year;
+    @Column(name = "anio")
+    private Integer anio;
 
-    @Column(name = "base_price", nullable = false, precision = 10, scale = 2)
-    private BigDecimal basePrice;
+    @Column(name = "precio_base")
+    private BigDecimal precioBase;
 
     @Column(name = "descripcion", length = 1000)
     private String descripcion;
@@ -35,8 +35,8 @@ public class Auto {
     private Boolean vendido;
 
     @ManyToOne
-    @JoinColumn(name = "seller_id", nullable = false)
-    private Usuario seller;
+    @JoinColumn(name = "vendedor_id", nullable = false)
+    private Usuario vendedor;
 
     @PrePersist
     public void prePersist() {

@@ -61,7 +61,7 @@ public class SubastaService {
 
     public List<SubastaDTO> getActiveAuctions() {
         Date now = new Date();
-        return subastaRepository.findByFechaInicioBeforeAndFechaFinAfterAndEstadoSubasta(
+        return subastaRepository.findByStartTimeBeforeAndEndTimeAfterAndEstadoSubasta(
                 now, now, EstadoSubasta.EN_PROGRESO)
                 .stream()
                 .map(this::mapToDTO)

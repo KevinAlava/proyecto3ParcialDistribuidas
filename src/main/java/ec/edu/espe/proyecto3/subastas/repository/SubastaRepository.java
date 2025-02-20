@@ -10,8 +10,8 @@ import java.util.Date;
 @Repository
 public interface SubastaRepository extends JpaRepository<Subasta, Long> {
     List<Subasta> findByEstadoSubasta(EstadoSubasta estadoSubasta);
-    List<Subasta> findByFechaInicioBeforeAndFechaFinAfterAndEstadoSubasta(
-        Date fechaActual, Date fechaActual2, EstadoSubasta estadoSubasta);
-    List<Subasta> findByFechaFinBeforeAndEstadoSubasta(
-        Date fechaActual, EstadoSubasta estadoSubasta);
+    List<Subasta> findByStartTimeBeforeAndEndTimeAfterAndEstadoSubasta(
+        Date currentDate, Date currentDate2, EstadoSubasta estadoSubasta);
+    List<Subasta> findByEndTimeBeforeAndEstadoSubasta(
+        Date currentDate, EstadoSubasta estadoSubasta);
 } 
