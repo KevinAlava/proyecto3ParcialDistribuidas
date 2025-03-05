@@ -37,7 +37,7 @@ public class SubastaService {
     @Autowired
     private SimpMessagingTemplate messagingTemplate;
 
-    @Scheduled(fixedRate = 60000) // Ejecutar cada minuto
+    @Scheduled(fixedRate = 1000) // Ejecutar cada segundo
     @Transactional
     public void verificarSubastasVencidas() {
         log.info("Verificando subastas vencidas...");
@@ -240,9 +240,41 @@ public class SubastaService {
                 autoSubasta.setVendido(true);
                 autoSubasta.setPrecioFinal(ultimaPuja.getMonto());
                 ultimaPuja.setGanadora(true);
+                
+                // Notificar al ganador
+                messagingTemplate.convertAndSendToUser(
+                    ultimaPuja.getComprador().getUsername(),
+                    "/queue/notifications",
+                    Map.of(
+                        "type", "AUCTION_WON",
+                        "message", String.format("¡Felicitaciones! Has ganado la subasta del auto %s %s por $%s", 
+                            auto.getMarca(), 
+                            auto.getModelo(),
+                            ultimaPuja.getMonto()),
+                        "subastaId", subastaId,
+                        "autoId", auto.getId(),
+                        "monto", ultimaPuja.getMonto()
+                    )
+                );
             } else {
                 // No se alcanzó el precio mínimo
                 auto.setEnSubasta(false);
+                
+                // Notificar a los participantes que no ganaron
+                for (Puja puja : pujas) {
+                    messagingTemplate.convertAndSendToUser(
+                        puja.getComprador().getUsername(),
+                        "/queue/notifications",
+                        Map.of(
+                            "type", "AUCTION_FAILED",
+                            "message", String.format("La subasta del auto %s %s ha finalizado sin alcanzar el precio mínimo", 
+                                auto.getMarca(), 
+                                auto.getModelo()),
+                            "subastaId", subastaId,
+                            "autoId", auto.getId()
+                        )
+                    );
+                }
             }
             
             autoRepository.save(auto);
@@ -253,6 +285,15 @@ public class SubastaService {
         }
         
         subastaRepository.save(subasta);
+        
+        // Notificar a todos los usuarios que la subasta ha finalizado
+        messagingTemplate.convertAndSend("/topic/subastas/" + subastaId, 
+            Map.of(
+                "type", "SUBASTA_FINALIZADA",
+                "subastaId", subastaId,
+                "message", "La subasta ha finalizado"
+            )
+        );
     }
 
     public List<Subasta> obtenerSubastasFinalizadas() {

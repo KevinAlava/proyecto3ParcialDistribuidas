@@ -2,6 +2,48 @@
 let stompClient = null;
 let currentUser = null;
 
+// Función para reproducir sonidos de notificación
+function playNotificationSound(type) {
+    const audio = new Audio();
+    switch(type) {
+        case 'success':
+            audio.src = '/sounds/success.mp3';
+            break;
+        case 'notification':
+            audio.src = '/sounds/notification.mp3';
+            break;
+    }
+    audio.play().catch(e => console.warn('No se pudo reproducir el sonido:', e));
+}
+
+// Función para mostrar notificaciones Toast
+function showNotification(type, message) {
+    const toastContainer = document.getElementById('toast-container');
+    if (!toastContainer) {
+        const container = document.createElement('div');
+        container.id = 'toast-container';
+        container.style.position = 'fixed';
+        container.style.top = '20px';
+        container.style.right = '20px';
+        container.style.zIndex = '1050';
+        document.body.appendChild(container);
+    }
+
+    const toast = document.createElement('div');
+    toast.className = `toast ${type === 'success' ? 'bg-success' : 'bg-danger'} text-white`;
+    toast.innerHTML = `
+        <div class="toast-body">
+            ${message}
+        </div>
+    `;
+    
+    toastContainer.appendChild(toast);
+    new bootstrap.Toast(toast, { delay: 5000 }).show();
+    
+    // Remover el toast después de que se oculte
+    toast.addEventListener('hidden.bs.toast', () => toast.remove());
+}
+
 // Conexión WebSocket
 function connectWebSocket() {
     const token = localStorage.getItem('token');
@@ -20,25 +62,33 @@ function connectWebSocket() {
             
             switch(data.type) {
                 case 'AUCTION_WON':
-                    showSuccessToast(data.message);
-                    // Actualizar inmediatamente la vista de pujas
-                    loadMisPujas();
-                    // Reproducir sonido de victoria
+                    showNotification('success', data.message);
                     playNotificationSound('success');
+                    // Actualizar la vista de pujas y subastas
+                    loadMisPujas();
+                    loadActiveAuctions();
                     break;
                     
-                case 'AUCTION_ENDED':
                 case 'AUCTION_FAILED':
-                    showErrorToast(data.message);
-                    // Actualizar la vista de pujas
-                    loadMisPujas();
-                    // Reproducir sonido de notificación
+                case 'AUCTION_ENDED':
+                    showNotification('error', data.message);
                     playNotificationSound('notification');
+                    // Actualizar la vista de pujas y subastas
+                    loadMisPujas();
+                    loadActiveAuctions();
                     break;
             }
         });
         
-        subscribeToAuctions();
+        // Suscribirse a actualizaciones de subastas
+        stompClient.subscribe('/topic/subastas', function(message) {
+            const data = JSON.parse(message.body);
+            if (data.type === 'SUBASTA_FINALIZADA') {
+                showNotification('info', data.message);
+                loadActiveAuctions();
+                loadMisPujas();
+            }
+        });
     }, function(error) {
         console.error('Error de conexión:', error);
         setTimeout(connectWebSocket, 5000); // Reintentar conexión
@@ -487,7 +537,7 @@ document.getElementById('registrarAutoForm').addEventListener('submit', function
         console.log('Respuesta del servidor:', text);
         
         if (!response.ok) {
-            throw new Error(text || 'Error al registrar el auto');
+                throw new Error(text || 'Error al registrar el auto');
         }
         
         let data;
@@ -582,7 +632,7 @@ document.getElementById('registerForm').addEventListener('submit', function(e) {
         console.log('Respuesta del servidor:', text);
         
         if (!response.ok) {
-            throw new Error(text || 'Error en el registro');
+                throw new Error(text || 'Error en el registro');
         }
         
         let data;
@@ -753,10 +803,10 @@ function loadActiveAuctions() {
 
         subastasList.innerHTML = '';
         if (subastas && subastas.length > 0) {
-            subastas.forEach(subasta => {
-                const card = createAuctionCard(subasta);
-                subastasList.appendChild(card);
-            });
+        subastas.forEach(subasta => {
+            const card = createAuctionCard(subasta);
+            subastasList.appendChild(card);
+        });
         } else {
             subastasList.innerHTML = `
                 <div class="col-12">
@@ -853,13 +903,13 @@ function createAuctionCard(subasta) {
                                 </div>
                                 <button type="submit" class="btn btn-success btn-sm w-100">
                                     <i class="fas fa-gavel me-2"></i>Realizar Puja
-                                </button>
+                            </button>
                             </form>
                         </div>
                     </div>
                 `;
             }
-
+            
             return `
                 <div class="card mb-3">
                     <div class="card-header bg-primary text-white">
@@ -1067,16 +1117,16 @@ function loadAutosDisponibles() {
             const selectedValue = select.value;
             select.innerHTML = '<option value="">Seleccione un auto...</option>';
             if (autos && autos.length > 0) {
-                autos.forEach(auto => {
+            autos.forEach(auto => {
                     if (!auto.vendido) {
-                        const option = document.createElement('option');
-                        option.value = auto.id;
-                        option.textContent = `${auto.marca} ${auto.modelo} (${auto.anio}) - $${auto.precioBase}`;
-                        select.appendChild(option);
+                const option = document.createElement('option');
+                option.value = auto.id;
+                option.textContent = `${auto.marca} ${auto.modelo} (${auto.anio}) - $${auto.precioBase}`;
+                select.appendChild(option);
                     }
-                });
-                if (selectedValue) {
-                    select.value = selectedValue;
+            });
+            if (selectedValue) {
+                select.value = selectedValue;
                 }
             }
         });
@@ -1113,7 +1163,7 @@ function loadVendedorSubastas() {
         if (subastasList) {
             subastasList.innerHTML = '';
             if (subastas && subastas.length > 0) {
-                subastas.forEach(subasta => {
+            subastas.forEach(subasta => {
                     const card = document.createElement('div');
                     card.className = 'col-md-6 mb-4';
                     card.innerHTML = `
@@ -1127,8 +1177,8 @@ function loadVendedorSubastas() {
                             </div>
                         </div>
                     `;
-                    subastasList.appendChild(card);
-                });
+                subastasList.appendChild(card);
+            });
             } else {
                 subastasList.innerHTML = '<div class="col-12"><p class="text-muted">No tiene subastas creadas</p></div>';
             }
@@ -1153,7 +1203,7 @@ function createAutoCard(auto) {
     } else {
         estadoBtn = '<span class="badge bg-primary">Disponible</span>';
     }
-    
+
     card.innerHTML = `
         <div class="card h-100">
             <div class="card-body">
@@ -1168,7 +1218,7 @@ function createAutoCard(auto) {
             </div>
         </div>
     `;
-    
+
     return card;
 }
 
@@ -1212,10 +1262,10 @@ function loadVendedorAutos() {
         if (autosList) {
             autosList.innerHTML = '';
             if (autos && autos.length > 0) {
-                autos.forEach(auto => {
-                    const card = createAutoCard(auto);
-                    autosList.appendChild(card);
-                });
+            autos.forEach(auto => {
+                const card = createAutoCard(auto);
+                autosList.appendChild(card);
+            });
             } else {
                 autosList.innerHTML = '<div class="col-12"><p class="text-muted">No tiene autos registrados</p></div>';
             }
@@ -1381,19 +1431,6 @@ function loadUsersList() {
     });
 }
 
-function playNotificationSound(type) {
-    const audio = new Audio();
-    switch(type) {
-        case 'success':
-            audio.src = '/sounds/success.mp3';
-            break;
-        case 'notification':
-            audio.src = '/sounds/notification.mp3';
-            break;
-    }
-    audio.play().catch(e => console.log('Error reproduciendo sonido:', e));
-}
-
 function loadSubastasFinalizadas() {
     const token = localStorage.getItem('token');
     if (!token) return;
@@ -1422,13 +1459,13 @@ function loadSubastasFinalizadas() {
         }
 
         subastas.forEach(subasta => {
-            const card = document.createElement('div');
-            card.className = 'col-md-4 mb-4';
-            card.innerHTML = `
-                <div class="card h-100">
-                    <div class="card-body">
+    const card = document.createElement('div');
+    card.className = 'col-md-4 mb-4';
+    card.innerHTML = `
+        <div class="card h-100">
+            <div class="card-body">
                         <h5 class="card-title">${subasta.titulo}</h5>
-                        <p class="card-text">
+                <p class="card-text">
                             <strong>Descripción:</strong> ${subasta.descripcion}<br>
                             <strong>Fecha Finalización:</strong> ${new Date(subasta.fechaFin).toLocaleString()}<br>
                             <strong>Estado:</strong> ${subasta.finalizada ? 'Finalizada' : 'En proceso'}<br>
@@ -1446,9 +1483,9 @@ function loadSubastasFinalizadas() {
                                 </div>
                             `).join('')}
                         </div>
-                    </div>
-                </div>
-            `;
+            </div>
+        </div>
+    `;
             container.appendChild(card);
         });
     })
