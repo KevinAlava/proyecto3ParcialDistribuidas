@@ -24,11 +24,11 @@ public class Subasta {
     private boolean cancelada = false;
     private boolean finalizada = false;
     
-    @OneToMany(mappedBy = "subasta", cascade = CascadeType.ALL)
-    @JsonManagedReference(value = "subasta-auto-reference")
+    @OneToMany(mappedBy = "subasta", fetch = FetchType.EAGER)
+    @JsonManagedReference(value = "subasta-autos")
     private List<AutoSubasta> autos = new ArrayList<>();
     
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "vendedor_id")
     private Usuario vendedor;
     

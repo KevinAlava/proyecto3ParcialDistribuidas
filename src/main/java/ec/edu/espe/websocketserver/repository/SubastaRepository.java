@@ -22,4 +22,10 @@ public interface SubastaRepository extends JpaRepository<Subasta, Long> {
     
     @Query("SELECT s FROM Subasta s WHERE s.activa = true AND s.fechaFin > CURRENT_TIMESTAMP")
     List<Subasta> findActiveAuctions();
+
+    @Query("SELECT s FROM Subasta s WHERE s.activa = false AND s.finalizada = true ORDER BY s.fechaFin DESC")
+    List<Subasta> findByEstado(String estado);
+
+    @Query("SELECT s FROM Subasta s WHERE s.activa = false AND s.finalizada = true ORDER BY s.fechaFin DESC")
+    List<Subasta> findByEstadoOrderByFechaFinDesc(String estado);
 } 

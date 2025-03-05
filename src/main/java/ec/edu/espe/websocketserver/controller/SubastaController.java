@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.http.HttpStatus;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -97,6 +98,23 @@ public class SubastaController {
             return ResponseEntity.ok().build();
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    @GetMapping("/admin/finalizadas")
+    public ResponseEntity<?> obtenerSubastasFinalizadas(Authentication authentication) {
+        try {
+            if (authentication == null || !authentication.getAuthorities().stream()
+                    .anyMatch(a -> a.getAuthority().equals("ADMIN"))) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body("Acceso denegado: Se requieren permisos de administrador");
+            }
+
+            List<Subasta> subastasFinalizadas = subastaService.obtenerSubastasFinalizadas();
+            return ResponseEntity.ok(subastasFinalizadas);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body("Error al obtener subastas finalizadas: " + e.getMessage());
         }
     }
 } 

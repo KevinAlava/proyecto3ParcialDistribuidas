@@ -226,7 +226,9 @@ public class SubastaService {
         
         // Procesar cada auto en la subasta
         for (AutoSubasta autoSubasta : subasta.getAutos()) {
-            Puja ultimaPuja = pujaRepository.findTopByAutoSubastaOrderByMontoDesc(autoSubasta)
+            List<Puja> pujas = pujaRepository.findByAutoSubasta(autoSubasta);
+            Puja ultimaPuja = pujas.stream()
+                .max((p1, p2) -> p1.getMonto().compareTo(p2.getMonto()))
                 .orElse(null);
                 
             Auto auto = autoSubasta.getAuto();
@@ -237,6 +239,7 @@ public class SubastaService {
                 auto.setComprador(ultimaPuja.getComprador());
                 autoSubasta.setVendido(true);
                 autoSubasta.setPrecioFinal(ultimaPuja.getMonto());
+                ultimaPuja.setGanadora(true);
             } else {
                 // No se alcanzó el precio mínimo
                 auto.setEnSubasta(false);
@@ -244,8 +247,15 @@ public class SubastaService {
             
             autoRepository.save(auto);
             autoSubastaRepository.save(autoSubasta);
+            if (ultimaPuja != null) {
+                pujaRepository.save(ultimaPuja);
+            }
         }
         
         subastaRepository.save(subasta);
+    }
+
+    public List<Subasta> obtenerSubastasFinalizadas() {
+        return subastaRepository.findByEstadoOrderByFechaFinDesc("FINALIZADA");
     }
 } 

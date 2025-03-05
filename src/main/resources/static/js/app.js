@@ -4,16 +4,44 @@ let currentUser = null;
 
 // Conexión WebSocket
 function connectWebSocket() {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
     const socket = new SockJS('/subastas-ws');
     stompClient = Stomp.over(socket);
-    stompClient.connect({}, function(frame) {
+    
+    stompClient.connect({'Authorization': `Bearer ${token}`}, function(frame) {
         console.log('Conectado: ' + frame);
-        loadActiveAuctions();
         
-        // Suscribirse a actualizaciones de subastas si es comprador
-        if (currentUser && currentUser.tipoUsuario === 'COMPRADOR') {
-            subscribeToAuctions();
-        }
+        // Suscribirse a notificaciones personales
+        const username = JSON.parse(atob(token.split('.')[1])).sub;
+        stompClient.subscribe('/user/queue/notifications', function(notification) {
+            const data = JSON.parse(notification.body);
+            
+            switch(data.type) {
+                case 'AUCTION_WON':
+                    showSuccessToast(data.message);
+                    // Actualizar inmediatamente la vista de pujas
+                    loadMisPujas();
+                    // Reproducir sonido de victoria
+                    playNotificationSound('success');
+                    break;
+                    
+                case 'AUCTION_ENDED':
+                case 'AUCTION_FAILED':
+                    showErrorToast(data.message);
+                    // Actualizar la vista de pujas
+                    loadMisPujas();
+                    // Reproducir sonido de notificación
+                    playNotificationSound('notification');
+                    break;
+            }
+        });
+        
+        subscribeToAuctions();
+    }, function(error) {
+        console.error('Error de conexión:', error);
+        setTimeout(connectWebSocket, 5000); // Reintentar conexión
     });
 }
 
@@ -101,134 +129,300 @@ window.addEventListener('load', function() {
 
 function logout() {
     // Limpiar datos de sesión
-    currentUser = null;
     localStorage.removeItem('token');
     localStorage.removeItem('currentUser');
+    currentUser = null;
     
-    // Desconectar WebSocket si existe
-    if (stompClient && stompClient.connected) {
-        stompClient.disconnect();
-    }
-    
-    // Restablecer la interfaz
+    // Ocultar secciones de usuario
     document.getElementById('loginSection').classList.remove('d-none');
     document.getElementById('registerSection').classList.remove('d-none');
     document.getElementById('userSection').classList.add('d-none');
     document.getElementById('controlPanel').classList.add('d-none');
-    document.getElementById('misSubastasSection').style.display = 'none';
+    
+    // Ocultar secciones específicas por tipo de usuario
     document.getElementById('misAutosSection').style.display = 'none';
+    document.getElementById('misSubastasSection').style.display = 'none';
+    document.getElementById('misPujasSection').style.display = 'none';
     
-    // Limpiar contenedores
-    document.getElementById('subastasList').innerHTML = '';
-    document.getElementById('subastasActivasList').innerHTML = '';
-    document.getElementById('misSubastasList').innerHTML = '';
-    document.getElementById('misAutosList').innerHTML = '';
-    
-    // Limpiar formularios
-    document.getElementById('registrarAutoForm').reset();
-    document.getElementById('crearSubastaForm').reset();
-    
-    // Si existe el contenedor de usuarios admin, limpiarlo
-    const usersListContainer = document.getElementById('usersListContainer');
-    if (usersListContainer) {
-        usersListContainer.innerHTML = '';
+    // Limpiar y ocultar secciones de administrador
+    const adminUsersList = document.getElementById('adminUsersList');
+    if (adminUsersList) {
+        adminUsersList.innerHTML = '';
+    }
+
+    // Ocultar sección de subastas finalizadas
+    const subastasFinalizadasSection = document.getElementById('subastasFinalizadasSection');
+    if (subastasFinalizadasSection) {
+        subastasFinalizadasSection.style.display = 'none';
+    }
+    const subastasFinalizadasList = document.getElementById('subastasFinalizadasList');
+    if (subastasFinalizadasList) {
+        subastasFinalizadasList.innerHTML = '';
     }
     
-    // Limpiar el panel de control
-    const controlPanel = document.getElementById('controlPanel');
-    const panelBody = controlPanel.querySelector('.card-body');
-    while (panelBody.children.length > 1) {
-        panelBody.removeChild(panelBody.lastChild);
+    // Desconectar WebSocket
+    if (stompClient) {
+        stompClient.disconnect();
+        stompClient = null;
     }
     
-    // Mostrar mensaje de éxito
-    showSuccessToast('Sesión cerrada correctamente');
-    
-    // Cargar subastas activas para usuarios no autenticados
+    // Recargar solo las subastas activas
     loadActiveAuctions();
+    
+    showSuccessToast('Sesión cerrada correctamente');
 }
 
 // Funciones de UI
 function updateUIForUser(user) {
-    // Limpiar el panel de control antes de agregar nuevos elementos
+    const loginSection = document.getElementById('loginSection');
+    const registerSection = document.getElementById('registerSection');
+    const userSection = document.getElementById('userSection');
+    const userInfo = document.getElementById('userInfo');
     const controlPanel = document.getElementById('controlPanel');
-    const panelBody = controlPanel.querySelector('.card-body');
-    
-    // Limpiar el contenido existente del panel
-    while (panelBody.children.length > 1) {
-        panelBody.removeChild(panelBody.lastChild);
-    }
-    
-    // Mostrar elementos comunes
-    document.getElementById('loginSection').classList.add('d-none');
-    document.getElementById('registerSection').classList.add('d-none');
-    document.getElementById('userSection').classList.remove('d-none');
-    document.getElementById('controlPanel').classList.remove('d-none');
-    document.getElementById('userInfo').textContent = `${user.nombre} (${user.tipoUsuario})`;
+    const misAutosSection = document.getElementById('misAutosSection');
+    const misSubastasSection = document.getElementById('misSubastasSection');
+    const misPujasSection = document.getElementById('misPujasSection');
+    const subastasActivasSection = document.getElementById('subastasActivasList');
+
+    // Ocultar secciones de login/registro
+    loginSection.classList.add('d-none');
+    registerSection.classList.add('d-none');
+    userSection.classList.remove('d-none');
+
+    // Mostrar información del usuario
+    userInfo.textContent = `${user.nombre} ${user.apellido} (${user.tipoUsuario})`;
 
     // Ocultar todas las secciones primero
-    document.getElementById('misAutosSection').style.display = 'none';
-    document.getElementById('misSubastasSection').style.display = 'none';
-
-    if (user.tipoUsuario === 'VENDEDOR' || user.tipoUsuario === 'ADMIN') {
-        // Crear botón de nueva subasta
-        const crearSubastaBtn = document.createElement('button');
-        crearSubastaBtn.className = 'btn btn-primary mb-3 w-100';
-        crearSubastaBtn.setAttribute('data-bs-toggle', 'modal');
-        crearSubastaBtn.setAttribute('data-bs-target', '#crearSubastaModal');
-        crearSubastaBtn.innerHTML = '<i class="fas fa-plus-circle me-2"></i>Crear Nueva Subasta';
-        panelBody.appendChild(crearSubastaBtn);
-
-        // Crear botón de registrar auto
-        const registrarAutoBtn = document.createElement('button');
-        registrarAutoBtn.className = 'btn btn-success w-100';
-        registrarAutoBtn.setAttribute('data-bs-toggle', 'modal');
-        registrarAutoBtn.setAttribute('data-bs-target', '#registrarAutoModal');
-        registrarAutoBtn.innerHTML = '<i class="fas fa-car me-2"></i>Registrar Auto';
-        panelBody.appendChild(registrarAutoBtn);
-
-        // Mostrar secciones relevantes
-        document.getElementById('misAutosSection').style.display = 'block';
-        document.getElementById('misSubastasSection').style.display = 'block';
-
-        // Cargar datos
-        loadVendedorAutos();
-        loadVendedorSubastas();
-    }
-
-    if (user.tipoUsuario === 'COMPRADOR') {
-        // Crear botón de realizar pujas
-        const realizarPujaBtn = document.createElement('button');
-        realizarPujaBtn.className = 'btn btn-success w-100';
-        realizarPujaBtn.innerHTML = '<i class="fas fa-gavel me-2"></i>Realizar Pujas';
-        realizarPujaBtn.onclick = function() {
-            if (!stompClient || !stompClient.connected) {
-                connectWebSocket();
-            }
-            enableBidding();
-            showSuccessToast('Conectado al sistema de pujas en tiempo real');
-            document.getElementById('subastasActivasList').scrollIntoView({ behavior: 'smooth' });
-        };
-        panelBody.appendChild(realizarPujaBtn);
-    }
+    misAutosSection.style.display = 'none';
+    misSubastasSection.style.display = 'none';
+    misPujasSection.style.display = 'none';
+    controlPanel.classList.add('d-none');
 
     if (user.tipoUsuario === 'ADMIN') {
-        // Crear botón para gestionar usuarios
-        const gestionUsuariosBtn = document.createElement('button');
-        gestionUsuariosBtn.className = 'btn btn-info w-100 mt-3';
-        gestionUsuariosBtn.onclick = loadUsersList;
-        gestionUsuariosBtn.innerHTML = '<i class="fas fa-users me-2"></i>Gestionar Usuarios';
-        panelBody.appendChild(gestionUsuariosBtn);
+        controlPanel.classList.remove('d-none');
+        controlPanel.innerHTML = `
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h3 class="mb-0">
+                        <i class="fas fa-tools me-2"></i>Panel de Administrador
+                    </h3>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <button class="btn btn-primary w-100" onclick="showModal('crearSubastaModal')">
+                                <i class="fas fa-plus-circle me-2"></i>Crear Nueva Subasta
+                            </button>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <button class="btn btn-success w-100" onclick="showModal('registrarAutoModal')">
+                                <i class="fas fa-car me-2"></i>Registrar Auto
+                            </button>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <button class="btn btn-info w-100" onclick="showModal('adminRegisterModal')">
+                                <i class="fas fa-user-plus me-2"></i>Registrar Usuario
+                            </button>
+                        </div>
+                    </div>
+                    <div id="usersListContainer" class="mt-4">
+                        <h4>Gestión de Usuarios</h4>
+                        <div class="table-responsive">
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>Usuario</th>
+                                        <th>Nombre</th>
+                                        <th>Tipo</th>
+                                        <th>Estado</th>
+                                        <th>Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="adminUsersList"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
 
-        // Crear contenedor para la lista de usuarios
-        const usersListContainer = document.createElement('div');
-        usersListContainer.id = 'usersListContainer';
-        usersListContainer.className = 'mt-3';
-        panelBody.appendChild(usersListContainer);
+        // Agregar el modal de registro de usuarios para admin
+        if (!document.getElementById('adminRegisterModal')) {
+            const modalHtml = `
+                <div class="modal fade" id="adminRegisterModal" tabindex="-1">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">Registrar Nuevo Usuario</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
+                                <form id="adminRegisterForm">
+                                    <div class="mb-3">
+                                        <label class="form-label">Nombre de Usuario</label>
+                                        <input type="text" class="form-control" name="username" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Contraseña</label>
+                                        <input type="password" class="form-control" name="password" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Email</label>
+                                        <input type="email" class="form-control" name="email" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Nombre</label>
+                                        <input type="text" class="form-control" name="nombre" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Apellido</label>
+                                        <input type="text" class="form-control" name="apellido" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Tipo de Usuario</label>
+                                        <select class="form-select" name="tipoUsuario" required>
+                                            <option value="ADMIN">Administrador</option>
+                                            <option value="VENDEDOR">Vendedor</option>
+                                            <option value="COMPRADOR">Comprador</option>
+                                        </select>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary w-100">
+                                        <i class="fas fa-user-plus me-2"></i>Registrar Usuario
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+            // Agregar el event listener para el formulario de registro de admin
+            document.getElementById('adminRegisterForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                const formData = new FormData(e.target);
+                
+                // Validaciones del formulario
+                const username = formData.get('username');
+                const password = formData.get('password');
+                const email = formData.get('email');
+                const nombre = formData.get('nombre');
+                const apellido = formData.get('apellido');
+                const tipoUsuario = formData.get('tipoUsuario');
+                
+                if (!username || !password || !email || !nombre || !apellido || !tipoUsuario) {
+                    showErrorToast('Por favor complete todos los campos');
+                    return;
+                }
+                
+                // Validar formato de email
+                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                if (!emailRegex.test(email)) {
+                    showErrorToast('Por favor ingrese un email válido');
+                    return;
+                }
+                
+                // Mostrar indicador de carga
+                const submitBtn = e.target.querySelector('button[type="submit"]');
+                const originalText = submitBtn.innerHTML;
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Registrando...';
+
+                const userData = {
+                    username: username.trim(),
+                    password: password,
+                    email: email.trim(),
+                    nombre: nombre.trim(),
+                    apellido: apellido.trim(),
+                    tipoUsuario: tipoUsuario
+                };
+
+                const token = localStorage.getItem('token');
+                fetch('/api/auth/registro', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify(userData)
+                })
+                .then(async response => {
+                    const text = await response.text();
+                    if (!response.ok) {
+                        throw new Error(text || 'Error en el registro');
+                    }
+                    return JSON.parse(text);
+                })
+                .then(data => {
+                    showSuccessToast('Usuario registrado exitosamente');
+                    
+                    // Cerrar el modal
+                    const modal = bootstrap.Modal.getInstance(document.getElementById('adminRegisterModal'));
+                    modal.hide();
+                    
+                    // Limpiar el formulario
+                    e.target.reset();
+                    
+                    // Recargar la lista de usuarios
+                    loadUsersList();
+                })
+                .catch(error => {
+                    console.error('Error en el registro:', error);
+                    showErrorToast(error.message || 'Error en el registro');
+                })
+                .finally(() => {
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = originalText;
+                });
+            });
+        }
+
+        loadUsersList();
+        loadActiveAuctions();
+        document.getElementById('subastasFinalizadasSection').style.display = 'block';
+        loadSubastasFinalizadas();
+    } else if (user.tipoUsuario === 'VENDEDOR') {
+        controlPanel.classList.remove('d-none');
+        controlPanel.innerHTML = `
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h3 class="mb-0">
+                        <i class="fas fa-tools me-2"></i>Panel de Vendedor
+                    </h3>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <button class="btn btn-primary w-100" onclick="showModal('crearSubastaModal')">
+                                <i class="fas fa-plus-circle me-2"></i>Crear Nueva Subasta
+                            </button>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <button class="btn btn-success w-100" onclick="showModal('registrarAutoModal')">
+                                <i class="fas fa-car me-2"></i>Registrar Auto
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        misAutosSection.style.display = 'block';
+        misSubastasSection.style.display = 'block';
+        loadVendedorAutos();
+        loadVendedorSubastas();
+        loadActiveAuctions();
+    } else if (user.tipoUsuario === 'COMPRADOR') {
+        misPujasSection.style.display = 'block';
+        loadMisPujas();
+        loadActiveAuctions();
     }
+}
 
-    // Cargar subastas activas para todos los usuarios
-    loadActiveAuctions();
+// Función auxiliar para mostrar modales
+function showModal(modalId) {
+    const modal = new bootstrap.Modal(document.getElementById(modalId));
+    modal.show();
 }
 
 // Registro de auto
@@ -445,103 +639,98 @@ function enableBidding() {
     });
 }
 
-// Realizar puja
-function realizarPuja(event) {
+// Función para cargar las pujas del comprador
+function loadMisPujas() {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    fetch('/api/pujas/comprador', {
+        headers: {
+            'Authorization': `Bearer ${token}`
+        }
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.text().then(text => {
+                throw new Error(text || 'Error al cargar las pujas');
+            });
+        }
+        return response.json();
+    })
+    .then(pujas => {
+        const pujasList = document.getElementById('misPujasList');
+        if (!pujasList) return;
+
+        pujasList.innerHTML = '';
+        if (pujas && pujas.length > 0) {
+            pujas.forEach(puja => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${puja.tituloSubasta}</td>
+                    <td>${puja.informacionAuto}</td>
+                    <td>$${puja.monto ? puja.monto.toFixed(2) : '0.00'}</td>
+                    <td>${puja.fecha ? new Date(puja.fecha).toLocaleString() : 'N/A'}</td>
+                    <td>
+                        ${puja.subastaFinalizada ? 
+                            (puja.ganadora ? 
+                                '<span class="badge bg-success">¡Ganador!</span>' : 
+                                '<span class="badge bg-danger">No ganador</span>'
+                            ) : 
+                            '<span class="badge bg-warning">En proceso</span>'
+                        }
+                    </td>
+                `;
+                
+                // Agregar clase especial si es ganador
+                if (puja.ganadora) {
+                    row.classList.add('table-success');
+                }
+                
+                pujasList.appendChild(row);
+            });
+        } else {
+            pujasList.innerHTML = '<tr><td colspan="5" class="text-center">No has realizado ninguna puja</td></tr>';
+        }
+    })
+    .catch(error => {
+        console.error('Error cargando pujas:', error);
+        showErrorToast(error.message || 'Error al cargar las pujas');
+    });
+}
+
+// Actualizar la función realizarPuja para recargar la lista de pujas después de una puja exitosa
+async function realizarPuja(event, subastaId, autoId, precioActual) {
     event.preventDefault();
-    const btn = event.target.closest('.puja-btn'); // Usar closest para asegurar que obtenemos el botón
-    if (!btn) return;
-
-    const subastaId = btn.dataset.subastaId;
-    const autoId = btn.dataset.autoId;
-    const precioActual = parseFloat(btn.dataset.precioActual);
-    const montoInput = document.querySelector(`#monto-${subastaId}-${autoId}`);
-    const monto = parseFloat(montoInput.value);
-
-    if (!monto || isNaN(monto) || monto <= 0) {
-        showErrorToast('Por favor ingrese un monto válido');
-        montoInput.focus();
-        return;
-    }
+    const form = event.target;
+    const monto = parseFloat(form.montoPuja.value);
 
     if (monto <= precioActual) {
-        showErrorToast(`El monto debe ser mayor a $${precioActual.toFixed(2)}`);
-        montoInput.focus();
+        showErrorToast('El monto debe ser mayor al precio actual');
         return;
     }
 
-    // Verificar conexión WebSocket
-    if (!stompClient || !stompClient.connected) {
-        showErrorToast('Reconectando al sistema de pujas...');
-        connectWebSocket();
-        setTimeout(() => realizarPuja(event), 1000);
-        return;
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`/api/subastas/${subastaId}/autos/${autoId}/pujar`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(monto)
+        });
+
+        if (!response.ok) {
+            const error = await response.text();
+            throw new Error(error);
+        }
+
+        showSuccessToast('Puja realizada exitosamente');
+        loadActiveAuctions();
+        loadMisPujas();
+    } catch (error) {
+        showErrorToast(error.message);
     }
-
-    // Deshabilitar el botón y mostrar spinner
-    btn.disabled = true;
-    const originalText = btn.innerHTML;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Pujando...';
-    montoInput.disabled = true;
-
-    // Preparar datos de la puja
-    const pujaData = {
-        autoId: autoId,
-        monto: monto,
-        compradorId: currentUser.id
-    };
-
-    // Enviar puja a través de WebSocket
-    stompClient.send("/app/subastas/" + subastaId + "/pujar", {}, JSON.stringify(pujaData));
-
-    // Escuchar la respuesta específica para esta puja
-    const subscription = stompClient.subscribe('/user/queue/pujas', function(message) {
-        try {
-            const response = JSON.parse(message.body);
-            
-            if (response.success) {
-                showSuccessToast('¡Puja realizada exitosamente!');
-                // Actualizar el precio actual en el botón
-                btn.dataset.precioActual = monto;
-                // Actualizar el input con el nuevo monto mínimo
-                montoInput.min = (monto + 1).toString();
-                montoInput.value = '';
-                montoInput.placeholder = `Monto mayor a $${monto.toFixed(2)}`;
-                // Actualizar el texto de ayuda
-                const helpText = btn.parentElement.nextElementSibling;
-                if (helpText) {
-                    helpText.textContent = `La puja debe ser mayor a $${monto.toFixed(2)}`;
-                }
-                // Recargar las subastas para ver todas las actualizaciones
-                loadActiveAuctions();
-            } else {
-                showErrorToast(response.message || 'Error al realizar la puja');
-                // Si hubo un error, permitir intentar de nuevo
-                montoInput.disabled = false;
-                montoInput.focus();
-            }
-        } catch (error) {
-            console.error('Error procesando respuesta:', error);
-            showErrorToast('Error al procesar la respuesta del servidor');
-        }
-        
-        // Restaurar el botón
-        btn.disabled = false;
-        btn.innerHTML = originalText;
-        montoInput.disabled = false;
-        
-        // Desuscribirse después de procesar la respuesta
-        subscription.unsubscribe();
-    });
-
-    // Timeout de seguridad para restaurar el botón si no hay respuesta
-    setTimeout(() => {
-        if (btn.disabled) {
-            btn.disabled = false;
-            btn.innerHTML = originalText;
-            montoInput.disabled = false;
-            showErrorToast('No se recibió respuesta del servidor, intente nuevamente');
-        }
-    }, 5000);
 }
 
 // Funciones de subastas
@@ -552,16 +741,45 @@ function loadActiveAuctions() {
     fetch('/api/subastas/activas', {
         headers: headers
     })
-    .then(response => response.json())
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('Error al cargar las subastas activas');
+        }
+        return response.json();
+    })
     .then(subastas => {
         const subastasList = document.getElementById('subastasActivasList');
+        if (!subastasList) return;
+
         subastasList.innerHTML = '';
-        subastas.forEach(subasta => {
-            const card = createAuctionCard(subasta);
-            subastasList.appendChild(card);
-        });
+        if (subastas && subastas.length > 0) {
+            subastas.forEach(subasta => {
+                const card = createAuctionCard(subasta);
+                subastasList.appendChild(card);
+            });
+        } else {
+            subastasList.innerHTML = `
+                <div class="col-12">
+                    <div class="alert alert-info text-center">
+                        <i class="fas fa-info-circle me-2"></i>No hay subastas activas en este momento
+                    </div>
+                </div>
+            `;
+        }
     })
-    .catch(error => console.error('Error cargando subastas activas:', error));
+    .catch(error => {
+        console.error('Error cargando subastas activas:', error);
+        const subastasList = document.getElementById('subastasActivasList');
+        if (subastasList) {
+            subastasList.innerHTML = `
+                <div class="col-12">
+                    <div class="alert alert-danger text-center">
+                        <i class="fas fa-exclamation-circle me-2"></i>${error.message}
+                    </div>
+                </div>
+            `;
+        }
+    });
 }
 
 // Cargar subastas activas al iniciar la página
@@ -573,61 +791,97 @@ function createAuctionCard(subasta) {
     const card = document.createElement('div');
     card.className = 'col-md-6 mb-4';
     
+    // Determinar el estado de la subasta
+    let estado = 'Activa';
+    let estadoClass = 'success';
+    if (subasta.finalizada) {
+        estado = 'Finalizada';
+        estadoClass = 'secondary';
+    } else if (subasta.cancelada) {
+        estado = 'Cancelada';
+        estadoClass = 'danger';
+    }
+
+    // Calcular tiempo restante
+    let tiempoRestanteHtml = '';
+    if (!subasta.finalizada && !subasta.cancelada) {
+        const fechaFin = new Date(subasta.fechaFin);
+        const ahora = new Date();
+        const diferencia = fechaFin - ahora;
+        
+        if (diferencia > 0) {
+            const horas = Math.floor(diferencia / (1000 * 60 * 60));
+            const minutos = Math.floor((diferencia % (1000 * 60 * 60)) / (1000 * 60));
+            tiempoRestanteHtml = `
+                <div class="alert alert-info">
+                    <i class="fas fa-clock me-2"></i>Tiempo restante: ${horas} horas, ${minutos} minutos
+                </div>
+            `;
+        }
+    }
+    
+    // Preparar la información de los autos
     let autosHtml = '';
     if (subasta.autos && subasta.autos.length > 0) {
         autosHtml = subasta.autos.map(autoSubasta => {
-            if (!autoSubasta || !autoSubasta.auto) {
-                console.error('AutoSubasta o Auto es undefined:', autoSubasta);
-                return '';
-            }
-
             const auto = autoSubasta.auto;
+            if (!auto) return '';
+
             const precioBase = auto.precioBase ? parseFloat(auto.precioBase) : 0;
-            const precioFinal = autoSubasta.precioFinal ? parseFloat(autoSubasta.precioFinal) : precioBase;
+            const precioActual = autoSubasta.precioFinal ? parseFloat(autoSubasta.precioFinal) : precioBase;
             
+            // Formulario de puja solo para compradores y subastas activas
             let pujaHtml = '';
-            
-            // Mostrar el botón de puja solo si:
-            // 1. El usuario está autenticado
-            // 2. Es un comprador
-            // 3. No es el vendedor del auto
-            // 4. La subasta está activa
-            // 5. No está finalizada ni cancelada
             if (currentUser && 
                 currentUser.tipoUsuario === 'COMPRADOR' && 
-                auto.vendedor && 
-                currentUser.id !== auto.vendedor.id &&
-                subasta.activa &&
-                !subasta.finalizada &&
+                !subasta.finalizada && 
                 !subasta.cancelada) {
                 pujaHtml = `
-                    <div class="mt-2">
-                        <div class="input-group">
-                            <input type="number" class="form-control form-control-sm" 
-                                   id="monto-${subasta.id}-${auto.id}" 
-                                   placeholder="Monto de la puja"
-                                   min="${precioFinal + 1}"
-                                   step="0.01">
-                            <button class="btn btn-success btn-sm puja-btn" 
-                                    data-subasta-id="${subasta.id}" 
-                                    data-auto-id="${auto.id}"
-                                    data-precio-actual="${precioFinal}">
-                                <i class="fas fa-gavel"></i> Pujar
-                            </button>
+                    <div class="card mt-3">
+                        <div class="card-body">
+                            <h6 class="card-title">Realizar Puja</h6>
+                            <form class="puja-form" onsubmit="realizarPuja(event, ${subasta.id}, ${auto.id}, ${precioActual})">
+                                <div class="input-group mb-2">
+                                    <span class="input-group-text">$</span>
+                                    <input type="number" 
+                                           class="form-control" 
+                                           name="montoPuja" 
+                                           min="${precioActual + 1}" 
+                                           step="0.01" 
+                                           required
+                                           placeholder="Ingrese monto mayor a $${precioActual}">
+                                </div>
+                                <button type="submit" class="btn btn-success btn-sm w-100">
+                                    <i class="fas fa-gavel me-2"></i>Realizar Puja
+                                </button>
+                            </form>
                         </div>
-                        <small class="text-muted">La puja debe ser mayor a $${precioFinal.toFixed(2)}</small>
                     </div>
                 `;
             }
-            
+
             return `
-                <div class="card mb-2">
+                <div class="card mb-3">
+                    <div class="card-header bg-primary text-white">
+                        <h6 class="mb-0">
+                            <i class="fas fa-car me-2"></i>${auto.marca} ${auto.modelo} (${auto.anio})
+                        </h6>
+                    </div>
                     <div class="card-body">
-                        <h6 class="card-title">${auto.marca || 'Sin marca'} ${auto.modelo || 'Sin modelo'} (${auto.anio || 'Sin año'})</h6>
-                        <p class="card-text">${auto.descripcion || 'Sin descripción'}</p>
-                        <div class="d-flex justify-content-between align-items-center">
-                            <span class="text-primary">Precio Base: $${precioBase.toFixed(2)}</span>
-                            <span class="text-success">Última Puja: $${precioFinal.toFixed(2)}</span>
+                        <p class="card-text">${auto.descripcion}</p>
+                        <div class="row">
+                            <div class="col-6">
+                                <div class="price-box border rounded p-2 text-center">
+                                    <small class="text-muted d-block">Precio Base</small>
+                                    <strong class="text-primary">$${precioBase.toFixed(2)}</strong>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="price-box border rounded p-2 text-center">
+                                    <small class="text-muted d-block">Precio Actual</small>
+                                    <strong class="text-success">$${precioActual.toFixed(2)}</strong>
+                                </div>
+                            </div>
                         </div>
                         ${pujaHtml}
                     </div>
@@ -635,42 +889,35 @@ function createAuctionCard(subasta) {
             `;
         }).join('');
     } else {
-        autosHtml = '<p class="text-muted">No hay autos en esta subasta</p>';
+        autosHtml = '<div class="alert alert-warning">No hay vehículos en esta subasta</div>';
     }
-
-    const estado = subasta.finalizada ? 'Finalizada' : 
-                   subasta.cancelada ? 'Cancelada' : 
-                   !subasta.activa ? 'Inactiva' : 'Activa';
-    const estadoClass = subasta.finalizada ? 'success' : 
-                       subasta.cancelada ? 'danger' : 
-                       !subasta.activa ? 'secondary' : 'primary';
 
     card.innerHTML = `
         <div class="card h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="card-title mb-0">${subasta.titulo || 'Sin título'}</h5>
+                <h5 class="mb-0">
+                    <i class="fas fa-gavel me-2"></i>${subasta.titulo || 'Subasta sin título'}
+                </h5>
                 <span class="badge bg-${estadoClass}">${estado}</span>
             </div>
             <div class="card-body">
                 <p class="card-text">${subasta.descripcion || 'Sin descripción'}</p>
-                <div class="text-muted mb-3">
-                    <small>
-                        <i class="fas fa-calendar-alt"></i> Inicia: ${subasta.fechaInicio ? new Date(subasta.fechaInicio).toLocaleString() : 'No definido'}<br>
-                        <i class="fas fa-clock"></i> Finaliza: ${subasta.fechaFin ? new Date(subasta.fechaFin).toLocaleString() : 'No definido'}
+                <div class="mb-3">
+                    <small class="text-muted">
+                        <i class="fas fa-calendar me-2"></i>Inicio: ${new Date(subasta.fechaInicio).toLocaleString()}
+                    </small><br>
+                    <small class="text-muted">
+                        <i class="fas fa-calendar-check me-2"></i>Fin: ${new Date(subasta.fechaFin).toLocaleString()}
                     </small>
                 </div>
-                <div class="autos-list">
+                ${tiempoRestanteHtml}
+                <div class="autos-section">
+                    <h6 class="border-bottom pb-2 mb-3">Vehículos en Subasta</h6>
                     ${autosHtml}
                 </div>
             </div>
         </div>
     `;
-
-    // Agregar event listeners a los botones de puja después de crear el card
-    const pujaButtons = card.querySelectorAll('.puja-btn');
-    pujaButtons.forEach(btn => {
-        btn.addEventListener('click', realizarPuja);
-    });
 
     return card;
 }
@@ -867,7 +1114,19 @@ function loadVendedorSubastas() {
             subastasList.innerHTML = '';
             if (subastas && subastas.length > 0) {
                 subastas.forEach(subasta => {
-                    const card = createAuctionCard(subasta);
+                    const card = document.createElement('div');
+                    card.className = 'col-md-6 mb-4';
+                    card.innerHTML = `
+                        <div class="card">
+                            <div class="card-body">
+                                <h5 class="card-title">${subasta.titulo}</h5>
+                                <p class="card-text">${subasta.descripcion}</p>
+                                <p>Fecha Inicio: ${new Date(subasta.fechaInicio).toLocaleString()}</p>
+                                <p>Fecha Fin: ${new Date(subasta.fechaFin).toLocaleString()}</p>
+                                <p>Estado: ${subasta.activa ? 'Activa' : 'Finalizada'}</p>
+                            </div>
+                        </div>
+                    `;
                     subastasList.appendChild(card);
                 });
             } else {
@@ -1009,103 +1268,193 @@ function checkAuctionsStatus() {
 setInterval(checkAuctionsStatus, 60000); // Verificar cada minuto
 
 // Funciones de administración
+async function toggleUserStatus(userId, isActive) {
+    try {
+        const token = localStorage.getItem('token');
+        if (!token) {
+            showErrorToast('No hay sesión activa');
+            return;
+        }
+
+        const endpoint = isActive ? 'activar' : 'desactivar';
+        const response = await fetch(`/api/admin/usuarios/${userId}/${endpoint}`, {
+            method: 'PUT',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (!response.ok) {
+            const error = await response.text();
+            throw new Error(error);
+        }
+
+        const usuario = await response.json();
+        showSuccessToast(`Usuario ${isActive ? 'activado' : 'desactivado'} correctamente`);
+        
+        // Actualizar la UI inmediatamente
+        const row = document.querySelector(`tr[data-user-id="${userId}"]`);
+        if (row) {
+            const statusCell = row.querySelector('.status-cell');
+            const actionButton = row.querySelector('.toggle-status-btn');
+            
+            if (statusCell) {
+                statusCell.textContent = isActive ? 'Activo' : 'Inactivo';
+                statusCell.className = `status-cell ${isActive ? 'text-success' : 'text-danger'}`;
+            }
+            
+            if (actionButton) {
+                actionButton.textContent = isActive ? 'Desactivar' : 'Activar';
+                actionButton.onclick = () => toggleUserStatus(userId, !isActive);
+            }
+        }
+
+        // Recargar la lista de usuarios para asegurar que todo esté actualizado
+        await loadUsersList();
+
+    } catch (error) {
+        console.error('Error:', error);
+        showErrorToast(error.message || 'Error al cambiar el estado del usuario');
+    }
+}
+
 function loadUsersList() {
     const token = localStorage.getItem('token');
-    if (!token) return;
+    if (!token) {
+        showErrorToast('No hay sesión activa');
+        return;
+    }
 
     fetch('/api/admin/usuarios', {
+        method: 'GET',
         headers: {
-            'Authorization': `Bearer ${token}`
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
         }
     })
-    .then(response => {
+    .then(async response => {
         if (!response.ok) {
-            throw new Error('No tiene permisos de administrador');
+            const text = await response.text();
+            throw new Error(text || 'Error al cargar la lista de usuarios');
         }
         return response.json();
     })
     .then(usuarios => {
-        const usersListContainer = document.getElementById('usersListContainer');
-        if (usersListContainer) {
-            // Crear la tabla
-            usersListContainer.innerHTML = `
-                <div class="table-responsive">
-                    <table class="table table-striped">
-                        <thead>
-                            <tr>
-                                <th>Usuario</th>
-                                <th>Nombre</th>
-                                <th>Email</th>
-                                <th>Tipo</th>
-                                <th>Estado</th>
-                                <th>Bloqueo</th>
-                                <th>Acciones</th>
-                            </tr>
-                        </thead>
-                        <tbody id="adminUsersList">
-                        </tbody>
-                    </table>
-                </div>
-            `;
+        const adminUsersList = document.getElementById('adminUsersList');
+        if (!adminUsersList) return;
 
-            const usersList = document.getElementById('adminUsersList');
+        adminUsersList.innerHTML = '';
+        if (usuarios && usuarios.length > 0) {
             usuarios.forEach(usuario => {
+                const isActive = usuario.activo;
                 const row = document.createElement('tr');
+                row.setAttribute('data-user-id', usuario.id);
                 row.innerHTML = `
                     <td>${usuario.username}</td>
                     <td>${usuario.nombre} ${usuario.apellido}</td>
-                    <td>${usuario.email}</td>
                     <td>${usuario.tipoUsuario}</td>
-                    <td>
-                        <span class="badge bg-${usuario.activo ? 'success' : 'danger'}">
-                            ${usuario.activo ? 'Activo' : 'Inactivo'}
-                        </span>
+                    <td class="status-cell ${isActive ? 'text-success' : 'text-danger'}">
+                        ${isActive ? 'Activo' : 'Inactivo'}
                     </td>
                     <td>
-                        <span class="badge bg-${usuario.bloqueado ? 'danger' : 'success'}">
-                            ${usuario.bloqueado ? 'Bloqueado' : 'Desbloqueado'}
-                        </span>
-                    </td>
-                    <td>
-                        <button class="btn btn-sm btn-${usuario.activo ? 'danger' : 'success'}"
-                                onclick="toggleUserStatus(${usuario.id}, ${usuario.activo})">
-                            ${usuario.activo ? 'Desactivar' : 'Activar'}
+                        <button class="btn btn-sm ${isActive ? 'btn-danger' : 'btn-success'} toggle-status-btn" 
+                                onclick="toggleUserStatus(${usuario.id}, ${!isActive})">
+                            ${isActive ? 'Desactivar' : 'Activar'}
                         </button>
                     </td>
                 `;
-                usersList.appendChild(row);
+                adminUsersList.appendChild(row);
             });
+        } else {
+            adminUsersList.innerHTML = '<tr><td colspan="5" class="text-center">No hay usuarios registrados</td></tr>';
         }
     })
     .catch(error => {
         console.error('Error cargando usuarios:', error);
-        showErrorToast(error.message);
+        showErrorToast(error.message || 'Error al cargar la lista de usuarios');
+        const adminUsersList = document.getElementById('adminUsersList');
+        if (adminUsersList) {
+            adminUsersList.innerHTML = '<tr><td colspan="5" class="text-center text-danger">Error al cargar la lista de usuarios</td></tr>';
+        }
     });
 }
 
-function toggleUserStatus(userId, isActive) {
+function playNotificationSound(type) {
+    const audio = new Audio();
+    switch(type) {
+        case 'success':
+            audio.src = '/sounds/success.mp3';
+            break;
+        case 'notification':
+            audio.src = '/sounds/notification.mp3';
+            break;
+    }
+    audio.play().catch(e => console.log('Error reproduciendo sonido:', e));
+}
+
+function loadSubastasFinalizadas() {
     const token = localStorage.getItem('token');
     if (!token) return;
 
-    const action = isActive ? 'desactivar' : 'activar';
-    fetch(`/api/admin/usuarios/${userId}/${action}`, {
-        method: 'PUT',
+    fetch('/api/subastas/admin/finalizadas', {
         headers: {
-            'Authorization': `Bearer ${token}`
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
         }
     })
-    .then(response => {
+    .then(async response => {
         if (!response.ok) {
-            throw new Error('Error al cambiar el estado del usuario');
+            const text = await response.text();
+            throw new Error(`Error al cargar subastas finalizadas: ${text}`);
         }
         return response.json();
     })
-    .then(() => {
-        showSuccessToast(`Usuario ${action}do exitosamente`);
-        loadUsersList();
+    .then(subastas => {
+        const container = document.getElementById('subastasFinalizadasList');
+        container.innerHTML = '';
+
+        if (subastas.length === 0) {
+            container.innerHTML = '<div class="col-12"><p class="text-center">No hay subastas finalizadas.</p></div>';
+            return;
+        }
+
+        subastas.forEach(subasta => {
+            const card = document.createElement('div');
+            card.className = 'col-md-4 mb-4';
+            card.innerHTML = `
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h5 class="card-title">${subasta.titulo}</h5>
+                        <p class="card-text">
+                            <strong>Descripción:</strong> ${subasta.descripcion}<br>
+                            <strong>Fecha Finalización:</strong> ${new Date(subasta.fechaFin).toLocaleString()}<br>
+                            <strong>Estado:</strong> ${subasta.finalizada ? 'Finalizada' : 'En proceso'}<br>
+                            <strong>Vendedor:</strong> ${subasta.vendedor.username}
+                        </p>
+                        <div class="mt-3">
+                            <h6>Autos en la subasta:</h6>
+                            ${subasta.autos.map(autoSubasta => `
+                                <div class="mb-2">
+                                    <strong>${autoSubasta.auto.marca} ${autoSubasta.auto.modelo}</strong><br>
+                                    Precio Final: $${autoSubasta.precioFinal}<br>
+                                    Estado: ${autoSubasta.vendido ? 'Vendido' : 'No vendido'}
+                                    ${autoSubasta.vendido && autoSubasta.comprador ? 
+                                        `<br>Comprador: ${autoSubasta.comprador.username}` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            `;
+            container.appendChild(card);
+        });
     })
     .catch(error => {
         console.error('Error:', error);
-        showErrorToast(error.message);
+        document.getElementById('subastasFinalizadasList').innerHTML = 
+            '<div class="col-12"><p class="text-center text-danger">Error al cargar subastas finalizadas.</p></div>';
     });
 }

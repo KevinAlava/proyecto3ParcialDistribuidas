@@ -14,7 +14,6 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 @Entity
 @Data
 @Table(name = "autos")
-@JsonIdentityInfo(generator = ObjectIdGenerators.PropertyGenerator.class, property = "id")
 public class Auto {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -28,17 +27,17 @@ public class Auto {
     private boolean vendido = false;
     private boolean enSubasta = false;
     
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "vendedor_id")
     @JsonIgnore
     private Usuario vendedor;
     
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "comprador_id")
     @JsonIgnore
     private Usuario comprador;
     
-    @OneToMany(mappedBy = "auto", cascade = CascadeType.ALL)
+    @OneToMany(mappedBy = "auto", fetch = FetchType.EAGER)
     @JsonIgnore
     private List<AutoSubasta> subastas = new ArrayList<>();
     

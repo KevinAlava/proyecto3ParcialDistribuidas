@@ -16,22 +16,21 @@ public class AutoSubasta {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "auto_id")
-    @JsonBackReference(value = "auto-subastas")
     private Auto auto;
     
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "subasta_id")
     @JsonBackReference(value = "subasta-autos")
     private Subasta subasta;
     
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "comprador_id")
     @JsonBackReference(value = "comprador-autosubasta")
     private Usuario comprador;
     
-    @OneToMany(mappedBy = "autoSubasta", cascade = CascadeType.ALL)
+    @OneToMany(mappedBy = "autoSubasta", fetch = FetchType.EAGER)
     @JsonManagedReference
     private List<Puja> pujas = new ArrayList<>();
     
